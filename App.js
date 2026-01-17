@@ -1,13 +1,24 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+} from "firebase/auth";
+import { auth } from "./src/firebase";
 
 const palette = {
   ink: "#0B1F3A",
@@ -67,12 +78,23 @@ const studentCards = [
   { label: "SOS", value: "Pronto" },
 ];
 
-const ActionButton = ({ label, variant = "primary" }) => (
+const authErrors = {
+  "auth/invalid-email": "Email invalido.",
+  "auth/user-not-found": "Usuario nao encontrado.",
+  "auth/wrong-password": "Senha incorreta.",
+  "auth/email-already-in-use": "Esse email ja esta em uso.",
+  "auth/weak-password": "Senha fraca. Use pelo menos 6 caracteres.",
+};
+
+const ActionButton = ({ label, variant = "primary", onPress, disabled }) => (
   <TouchableOpacity
     style={[
       styles.button,
       variant === "ghost" ? styles.buttonGhost : styles.buttonPrimary,
+      disabled && styles.buttonDisabled,
     ]}
+    onPress={onPress}
+    disabled={disabled}
   >
     <Text
       style={
@@ -107,20 +129,170 @@ const Section = ({ title, body, actions }) => (
   </View>
 );
 
+const AuthScreen = ({
+  isLogin,
+  setIsLogin,
+  email,
+  setEmail,
+  password,
+  setPassword,
+  onSubmit,
+  loading,
+  error,
+}) => (
+  <KeyboardAvoidingView
+    behavior={Platform.OS === "ios" ? "padding" : undefined}
+    style={styles.authContainer}
+  >
+    <View style={styles.hero}>
+      <Text style={styles.eyebrow}>Guardiao Digital</Text>
+      <Text style={styles.heroTitle}>Acesso rapido e seguro</Text>
+      <Text style={styles.heroBody}>
+        Entre para acompanhar a rotina ou crie uma conta para iniciar o
+        monitoramento inteligente.
+      </Text>
+    </View>
+
+    <View style={styles.authCard}>
+      <View style={styles.authHeader}>
+        <Text style={styles.sectionTitle}>
+          {isLogin ? "Entrar" : "Criar conta"}
+        </Text>
+        <TouchableOpacity onPress={() => setIsLogin(!isLogin)}>
+          <Text style={styles.linkText}>
+            {isLogin ? "Novo por aqui?" : "Ja tenho conta"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.form}>
+        <Text style={styles.inputLabel}>Email</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="email@exemplo.com"
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+        />
+        <Text style={styles.inputLabel}>Senha</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="********"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+        />
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        <ActionButton
+          label={isLogin ? "Entrar" : "Criar conta"}
+          onPress={onSubmit}
+          disabled={loading}
+        />
+        {loading ? (
+          <ActivityIndicator color={palette.ink} style={styles.loading} />
+        ) : null}
+      </View>
+    </View>
+  </KeyboardAvoidingView>
+);
+
 export default function App() {
   const [mode, setMode] = useState("parent");
+  const [user, setUser] = useState(null);
+  const [initializing, setInitializing] = useState(true);
+  const [isLogin, setIsLogin] = useState(true);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      if (initializing) {
+        setInitializing(false);
+      }
+    });
+
+    return unsubscribe;
+  }, [initializing]);
 
   const cards = useMemo(
     () => (mode === "parent" ? parentCards : studentCards),
     [mode]
   );
 
+  const handleSubmit = async () => {
+    if (!email || !password) {
+      setError("Preencha email e senha.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      if (isLogin) {
+        await signInWithEmailAndPassword(auth, email, password);
+      } else {
+        await createUserWithEmailAndPassword(auth, email, password);
+      }
+      setEmail("");
+      setPassword("");
+    } catch (err) {
+      setError(authErrors[err.code] || "Falha de autenticacao. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
+
+  if (initializing) {
+    return (
+      <SafeAreaView style={styles.loadingScreen}>
+        <ActivityIndicator color={palette.ink} size="large" />
+      </SafeAreaView>
+    );
+  }
+
+  if (!user) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <StatusBar barStyle="dark-content" />
+        <AuthScreen
+          isLogin={isLogin}
+          setIsLogin={setIsLogin}
+          email={email}
+          setEmail={setEmail}
+          password={password}
+          setPassword={setPassword}
+          onSubmit={handleSubmit}
+          loading={loading}
+          error={error}
+        />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" />
       <ScrollView contentContainerStyle={styles.container}>
+        <View style={styles.topBar}>
+          <View>
+            <Text style={styles.eyebrow}>Guardiao Digital</Text>
+            <Text style={styles.userEmail}>{user.email}</Text>
+          </View>
+          <TouchableOpacity onPress={handleLogout}>
+            <Text style={styles.linkText}>Sair</Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.hero}>
-          <Text style={styles.eyebrow}>Guardiao Digital</Text>
           <Text style={styles.heroTitle}>Seguranca preditiva em tempo real</Text>
           <Text style={styles.heroBody}>
             Um app unico para pais e alunos, com rotina segura, alertas
@@ -212,9 +384,30 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: palette.sand,
   },
+  loadingScreen: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.sand,
+  },
   container: {
     padding: 20,
     gap: 18,
+  },
+  topBar: {
+    backgroundColor: palette.white,
+    borderRadius: 20,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "rgba(11, 31, 58, 0.08)",
+  },
+  userEmail: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: palette.ink,
   },
   hero: {
     backgroundColor: palette.white,
@@ -329,6 +522,9 @@ const styles = StyleSheet.create({
     color: palette.ink,
     fontWeight: "600",
   },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
   footer: {
     alignItems: "center",
     paddingVertical: 10,
@@ -336,5 +532,49 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: 12,
     color: "rgba(11, 31, 58, 0.5)",
+  },
+  authContainer: {
+    flex: 1,
+    padding: 20,
+    gap: 18,
+  },
+  authCard: {
+    backgroundColor: palette.white,
+    borderRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "rgba(11, 31, 58, 0.08)",
+    gap: 14,
+  },
+  authHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  form: {
+    gap: 12,
+  },
+  inputLabel: {
+    fontSize: 12,
+    color: "rgba(11, 31, 58, 0.6)",
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "rgba(11, 31, 58, 0.12)",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: palette.sand,
+  },
+  linkText: {
+    color: palette.ink,
+    fontWeight: "600",
+  },
+  errorText: {
+    color: palette.alert,
+    fontWeight: "600",
+  },
+  loading: {
+    marginTop: 10,
   },
 });
